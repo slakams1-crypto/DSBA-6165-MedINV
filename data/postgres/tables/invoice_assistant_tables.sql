@@ -7,6 +7,8 @@ create table public.provider (
   provider_address character varying(35) not null,
   provider_city character varying(20) not null,
   provider_state character varying(15) not null,
+  created_at timestamp with time zone null default now(),
+  created_by text null default system_user,
   constraint provider_pkey primary key (provider_id),
   constraint provider_provider_name_key unique (provider_name)
 ) TABLESPACE pg_default;
@@ -24,6 +26,8 @@ create table public.patient (
   patient_email character varying(25) null,
   patient_phone character varying(10) null,
   insurance_policy character varying(25) null,
+  created_at timestamp with time zone null default now(),
+  created_by text null default system_user,  
   constraint patient_pkey primary key (patient_id),
   constraint patient_provider_patient_identity_key unique (
     provider_id,
@@ -44,6 +48,8 @@ create table public.invoices (
   payment_total numeric(9, 2) not null,
   insurance_adjustment numeric(9, 2) null,
   amount_due numeric(9, 2) null,
+  created_at timestamp with time zone null default now(),
+  created_by text null default system_user,  
   constraint invoices_pkey primary key (invoice_id),
   constraint invoices_invoice_number_key unique (invoice_number)
 ) TABLESPACE pg_default;
@@ -55,6 +61,8 @@ create table public.invoice_items (
   line_item_description character varying(100) not null,
   line_item_amount numeric(9, 2) not null,
   line_item_quantity integer not null,
+  created_at timestamp with time zone null default now(),
+  created_by text null default system_user,  
   constraint invoice_items_pkey primary key (invoice_id, line_item_code),
   constraint invoice_items_invoice_line_code_key unique (invoice_id, line_item_code),
   constraint invoice_line_items_fk_invoices foreign KEY (invoice_id) references invoices (invoice_id)
@@ -66,6 +74,7 @@ create table public.invoice_batch (
   invoice_ord integer not null,
   invoice_id integer not null,
   created_at timestamp with time zone not null default now(),
+  created_by text null default system_user,  
   constraint invoice_batch_client_batch_id_invoice_ord_key unique (client_batch_id, invoice_ord)
 ) TABLESPACE pg_default;
 
