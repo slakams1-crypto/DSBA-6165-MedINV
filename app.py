@@ -47,7 +47,49 @@ from huggingface_hub import hf_hub_download, HfApi
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, Optional
 from langchain_core.documents import Document
+import cv2
 sys.path.insert(0, './MedInv')
+
+# ============================================
+# Logging Configuration
+# ============================================
+# ── Writable path outside Git tree ──
+LOG_DIR = os.path.expanduser("~/logs")  # /home/user/logs
+os.makedirs(LOG_DIR, exist_ok=True)
+
+LOG_FILE = os.path.join(LOG_DIR, "app.log")
+
+# Create directory exactly once, with explicit check
+if not os.path.exists(LOG_DIR):
+    os.makedirs(LOG_DIR)
+    print(f"📁 Created logs directory: {LOG_DIR}")
+else:
+    print(f"📁 Logs directory exists: {LOG_DIR}")
+
+# ── Clear pre-existing handlers ──
+root = logging.getLogger()
+for handler in root.handlers[:]:
+    root.removeHandler(handler)
+
+# ── Configure logging ──
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_FILE, mode="a"),
+        logging.StreamHandler(sys.stdout)
+    ],
+    force=True
+)
+
+logger = logging.getLogger(__name__)
+
+# ── Verify ──
+logger.info("=" * 60)
+logger.info("Logging initialized")
+logger.info(f"Log file: {LOG_FILE}")
+logger.info(f"Log file size: {os.path.getsize(LOG_FILE) if os.path.exists(LOG_FILE) else 0} bytes")
+logger.info("=" * 60)
 
 # ============================================
 # LangSmith Tracing Set to False on StartUp
@@ -142,6 +184,23 @@ body { font-size: 16px !important; }
     font-size: 12px !important;
     font-weight: 700 !important;
     text-transform: uppercase !important;
+    letter-spacing: 0.6px !important;
+    padding-top: 6px !important;
+    padding-bottom: 1px !important;
+    padding-left: 6px !important;
+    padding-right: 6px !important;
+    border-radius: 999px !important;
+    margin-bottom: 1px !important;   /* ← was 16px */
+    margin-top: 1px !important;
+    line-height: 1 !important;
+}
+.panel-badge-mod2 {
+    display: inline-block !important;
+    background: #eff6ff !important;
+    color: #2563eb !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+    text-transform: lowercase !important;
     letter-spacing: 0.6px !important;
     padding-top: 6px !important;
     padding-bottom: 1px !important;
@@ -252,6 +311,7 @@ embedding_model = HuggingFaceEmbeddings(
     model_name=Invmodel["embed-model"],
     cache_folder="/tmp/.cache"  # Use tmp for Spaces
 )
+logger.info("✓ Embedding model loaded")
 print("✓ Embedding model loaded")
 
 # =======================================
@@ -269,12 +329,14 @@ model = LightOnOcrForConditionalGeneration.from_pretrained(
 ).to(device)
 
 processor = LightOnOcrProcessor.from_pretrained(Invmodel["vqa-model"])
+logger.info("✓ Invoice model loaded")
 print("✓ Invoice model loaded")
 
 # ============================================
 # Get Batch Size from the configuration/environment variable
 # ============================================
 invoice_batch_size = int(os.getenv('INVOICE_BATCH_SIZE',"2"))
+logger.info(f"DEBUG: Invoice Batch Size: {invoice_batch_size}")
 print(f"DEBUG: Invoice Batch Size: {invoice_batch_size}")
 
 # Initialize a global variable to store extracted invoice data
@@ -292,8 +354,10 @@ hf_token = os.getenv('HUGGINGFACE_API_KEY')
 if hf_token:
     # Authenticate silently without prompting
     login(token=hf_token, add_to_git_credential=True)
+    logger.info("✓ Successfully authenticated with Hugging Face Hub")
     print("✓ Successfully authenticated with Hugging Face Hub")
 else:
+    logger.info("Warning: HF_TOKEN not found. Some features may be limited.")
     print("Warning: HF_TOKEN not found. Some features may be limited.")
 
 # ============================================
@@ -322,8 +386,8 @@ VISION_PROMPT = (
 # ============================================
 # Get Database Environment Variables
 # ============================================
-POSTGRES_URL = os.getenv("SUPABASE_URL", "https://gttssffdfdfdfdffsyleksbc.supabase.co")
-POSTGRES_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCOiJzdXBh...")
+POSTGRES_URL = os.getenv("POSTGRES_URL", "https://gttssffdfdfdfdffsyleksbc.supabase.co")
+POSTGRES_KEY = os.getenv("POSTGRES_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCOiJzdXBh...")
 if not POSTGRES_KEY:
     print("❌ POSTGRES_KEY not set in environment")
 print("✅ Loaded Database Environment variables...")
@@ -331,6 +395,7 @@ print("✅ Loaded Database Environment variables...")
 # ============================================
 # Load existing vector store
 # ============================================
+logger.info("🔄 Loading Chroma vector store...")
 print("🔄 Loading Chroma vector store...")
 persist_directory = './data/vectorstore/InvoiceVStore'
 
@@ -348,6 +413,7 @@ vectorstore = Chroma(
 )
 
 doc_count = vectorstore._collection.count()
+logger.info(f"✓ Loaded vector store with {doc_count} documents using HuggingFace embeddings")
 print(f"✓ Loaded vector store with {doc_count} documents using HuggingFace embeddings")
 
 # =========================================
@@ -375,11 +441,13 @@ png_files_in_dataset_repo = [f for f in files if f.endswith(".png")]
 
 # Check if pdf files exist or not.
 if pdf_files_in_dataset_repo:
+    logger.info(f"Found {len(pdf_files_in_dataset_repo)} PDF files in the dataset repo.")
     print(f"Found {len(pdf_files_in_dataset_repo)} PDF files in the dataset repo.")
     print(f"First PDF file in the dataset repo list: {pdf_files_in_dataset_repo[0]}")
 
 # Check if png files exist or not.
 if png_files_in_dataset_repo:
+    logger.info(f"Found {len(png_files_in_dataset_repo)} PNG files in the dataset repo.")
     print(f"Found {len(png_files_in_dataset_repo)} PNG files in the dataset repo.")
     print(f"First PNG file in the dataset repo list: {png_files_in_dataset_repo[0]}")
 
@@ -435,12 +503,15 @@ def _encode_image_to_base64(image_path: str, max_dimension: int = None) -> tuple
                 encoded = base64.b64encode(buffered.getvalue()).decode('utf-8')
                 return encoded, mime_type
             except Exception as e:
+                logger.error(f"Error saving or encoding image {image_path}: {e}")
                 print(f"Error saving or encoding image {image_path}: {e}")
                 return "", ""
     except FileNotFoundError:
+        logger.error(f"❌ Error: Image file not found at {image_path}")
         print(f"❌ Error: Image file not found at {image_path}")
         return "", ""
     except Exception as e:
+        logger.error(f"Error opening image {image_path}: {e}")
         print(f"Error opening image {image_path}: {e}")
         return "", ""
 
@@ -473,6 +544,7 @@ def currency_to_float(currency_str):
             return -value if is_negative else value
         return None
     except ValueError:
+        logger.error(f"Warning: Could not convert '{currency_str}' to float.")
         print(f"Warning: Could not convert '{currency_str}' to float.")
         return None
         
@@ -515,6 +587,7 @@ def clean_floats(obj):
                 return None
             return float(obj)
     except ImportError:
+        logger.error("clean_floats()-Import Error")
         pass
     return obj    
 
@@ -600,6 +673,7 @@ def get_client_batch_id():
     # Generate a single client_batch_id for this batch processing run
     client_batch_id = uuid.uuid4()
     return client_batch_id
+    logger.info(f"Processing batch with client_batch_id: {client_batch_id}")
     print(f"Processing batch with client_batch_id: {client_batch_id}")
 
 # ==========================================
@@ -646,14 +720,15 @@ def lookup_invoice_in_database(invoice_no: str) -> Optional[str]:
     Returns formatted text if found, None if not found.
     """    
     try:
-        supabase = create_client(POSTGRES_URL, POSTGRES_KEY)
-        result = supabase.rpc("get_invoice_by_number", {
+        postgres = create_client(POSTGRES_URL, POSTGRES_KEY)
+        result = postgres.rpc("get_invoice_by_number", {
             "p_invoice_number": invoice_no
         }).execute()
         
         print(f"DEBUG RPC raw response: {json.dumps(result.data, indent=2, default=str)}")
         
         if result.data is None:
+            logger.info("DEBUG: result.data is None")
             print("DEBUG: result.data is None")
             return None
         
@@ -665,6 +740,7 @@ def lookup_invoice_in_database(invoice_no: str) -> Optional[str]:
             # Wrapped in list
             raw = result.data[0]
         else:
+            logger.info(f"DEBUG: Unexpected result.data type: {type(result.data)}")
             print(f"DEBUG: Unexpected result.data type: {type(result.data)}")
             return None
         
@@ -680,6 +756,7 @@ def lookup_invoice_in_database(invoice_no: str) -> Optional[str]:
         return format_invoice_from_json(invoice_data)
     
     except Exception as e:
+        logger.error(f"⚠️ Database lookup error for {invoice_no}: {e}")
         print(f"⚠️ Database lookup error for {invoice_no}: {e}")
         import traceback
         print(f"🔥 Exception type: {type(e).__name__}")
@@ -828,6 +905,7 @@ def add_documents_to_vectorstore(vectorstore, input_pdffile_path, output_vectors
 
       if contents:
         # print(f"Contents found: {contents}")
+        logger.info(f"Number of contents found: {len(contents)}")
         print(f"Number of contents found: {len(contents)}")
 
         # Load an existing vector store
@@ -837,18 +915,22 @@ def add_documents_to_vectorstore(vectorstore, input_pdffile_path, output_vectors
         )
 
         # print(f"✓ Vector store loaded from: {vectorstore_loaded.persist_directory}")
+        logger.info(f"✓ Loaded vector store with {vectorstore_loaded._collection.count()} documents")
         print(f"✓ Loaded vector store with {vectorstore_loaded._collection.count()} documents")
 
         contents.sort()
+        logger.info(f"Sorted contents: {contents}")
         print(f"Sorted contents: {contents}")
 
         pdf_files_in_contents = [f for f in contents if f.endswith('.pdf')]
 
         if pdf_files_in_contents:
+            logger.info(f"Found {len(pdf_files_in_contents)} PDF files in the directory list.")
             print(f"Found {len(pdf_files_in_contents)} PDF files in the directory list.")
             print(f"First PDF file in the list: {pdf_files_in_contents[0]}")
 
             for pdf_file in pdf_files_in_contents:
+                logger.info(f"Processing: {pdf_file}")
                 print(f"Processing: {pdf_file}")
 
                 try:
@@ -861,24 +943,31 @@ def add_documents_to_vectorstore(vectorstore, input_pdffile_path, output_vectors
 
                   # Split the loaded documents
                   all_splits = split_document_into_chunks(document)
+                  logger.info(f"Split each document into {len(all_splits)} chunks")
                   print(f"Split each document into {len(all_splits)} chunks")
 
                   vectorstore_loaded.add_documents(all_splits)
+                  logger.info(f"✓ Added {len(all_splits)} splits to the vector store")
                   print(f"✓ Added {len(all_splits)} splits to the vector store")
                   print(f"✓ Vector store now has {vectorstore_loaded._collection.count()} documents")
 
                 except Exception as e:
+                  logger.error(f"Error loading PDF: {str(e)}")
                   error_message = f"Error loading PDF: {str(e)}"
                   print(error_message)
 
             vectorstore_loaded.persist()
+            logger.info(f"✓ Vector store persisted to: {vectorstore_loaded}")
             print(f"✓ Vector store persisted to: {vectorstore_loaded}")
 
         else:
+            logger.info("No PDF files explicitly ending with '.pdf' were found in the directory list.")
             print("No PDF files explicitly ending with '.pdf' were found in the directory list.")
       else:
+          logger.info("No contents found in the directory.")
           print("No contents found in the directory.")
   else:
+      logger.info(f"Error: The directory '{input_pdffile_path}' does not exist or is not accessible.")
       print(f"Error: The directory '{input_pdffile_path}' does not exist or is not accessible.")    
       print(f"Checking contents of: {input_pdffile_path}")
       ROOT_DIR = "/home/user/app/invoices"
@@ -887,19 +976,23 @@ def add_documents_to_vectorstore(vectorstore, input_pdffile_path, output_vectors
           contents = [f for f in os.listdir(ROOT_DIR) if f.endswith('.pdf')]
           
           if contents:
+              logger.info(f"Contents found: {contents}")
               print(f"Contents found: {contents}")
               print(f"Number of contents found: {len(contents)}")
               
               contents.sort()
+              logger.info(f"Sorted contents: {contents}")
               print(f"Sorted contents: {contents}")
     
               pdf_files_in_contents = [f for f in contents if f.endswith('.pdf')]
             
               if pdf_files_in_contents:
+                  logger.info(f"Found {len(pdf_files_in_contents)} PDF files in the directory list.")
                   print(f"Found {len(pdf_files_in_contents)} PDF files in the directory list.")
                   print(f"First PDF file in the list: {pdf_files_in_contents[0]}")
             
                   for pdf_file in pdf_files_in_contents:
+                      logger.info(f"Processing: {pdf_file}")
                       print(f"Processing: {pdf_file}")
         
                       try:
@@ -913,24 +1006,31 @@ def add_documents_to_vectorstore(vectorstore, input_pdffile_path, output_vectors
         
                           # Split the loaded documents
                           all_splits = split_document_into_chunks(document)
+                          logger.info(f"Split each document into {len(all_splits)} chunks")
                           print(f"Split each document into {len(all_splits)} chunks")
         
                           vectorstore.add_documents(all_splits)
+                          logger.info(f"✓ Added {len(all_splits)} splits to the vector store")
                           print(f"✓ Added {len(all_splits)} splits to the vector store")
                           print(f"✓ Vector store now has {vectorstore._collection.count()} documents")
         
                       except Exception as e:
+                          logger.error(f"Error loading PDF: {str(e)}")
                           error_message = f"Error loading PDF: {str(e)}"
                           print(error_message)
     
                   vectorstore.persist()
+                  logger.info(f"✓ Vector store persisted to: {vectorstore}")
                   print(f"✓ Vector store persisted to: {vectorstore}")
     
               else:
+                  logger.info("No PDF files explicitly ending with '.pdf' were found in the directory list.")
                   print("No PDF files explicitly ending with '.pdf' were found in the directory list.")
           else:
+              logger.info("No contents found in the directory.")
               print("No contents found in the directory.")
       else:
+          logger.info(f"❌ Error: The directory '{input_pdffile_path}' does not exist or is not accessible.")
           print(f"❌ Error: The directory '{input_pdffile_path}' does not exist or is not accessible.")
 
 # ===========================================
@@ -974,10 +1074,12 @@ def retrieve_context(query: str) -> str:
         
         if not filtered_docs:
             _kb_had_results = False
+            logger.info(f"DEBUG: Top semantic scores were: {[score for _, score in docs]}")
             print(f"DEBUG: Top semantic scores were: {[score for _, score in docs]}")
             return "No relevant information found in knowledge base."
         
         _kb_had_results = True
+        logger.info(f"🔍 Retrieved {len(filtered_docs)} document(s) via semantic search")
         print(f"🔍 Retrieved {len(filtered_docs)} document(s) via semantic search")
         
         return "\n\n".join([
@@ -987,6 +1089,7 @@ def retrieve_context(query: str) -> str:
     
     except Exception as e:
         _kb_had_results = False
+        logger.error(f"Error in retrieve_context: {e}")
         print(f"Error in retrieve_context: {e}")
         return f"Error retrieving context: {e}"
 
@@ -1013,6 +1116,7 @@ def generate_chat(user_input, chat_history):
     try:
         # FORCE retrieval before agent invocation
         kb_raw = retrieve_context.invoke({"query": user_input})
+        logger.info(f"[KB] Retrieved: '{kb_raw[:200]}...'")
         print(f"[KB] Retrieved: '{kb_raw[:200]}...'")
         
         # Parse retrieved content
@@ -1039,6 +1143,7 @@ def generate_chat(user_input, chat_history):
         if use_direct_kb:
             # Factual/definition with good KB answer → return directly
             final_ai_message = kb_answer
+            logger.info(f"[KB Direct] Factual answer: '{final_ai_message[:200]}...'")
             print(f"[KB Direct] Factual answer: '{final_ai_message[:200]}...'")
         else:
             
@@ -1066,6 +1171,7 @@ def generate_chat(user_input, chat_history):
 
     except Exception as e:
         error_msg = f"Error: {str(e)}"
+        logger.error(f"Error in generate_chat: {e}")
         print(f"Error in generate_chat: {e}")
         updated = []
         if chat_history:
@@ -1150,8 +1256,10 @@ def process_invoice_ocr_output(output_text, invoice_ord: int = None, client_batc
             # print("Parsed Invoice Items DataFrame:")
             # display(df_invoice_items.head())
         except ValueError as e:
+            logger.error(f"Could not parse table data from OCR output: {e}")
             print(f"Could not parse table data from OCR output: {e}")
         except Exception as e:
+            logger.error(f"An unexpected error occurred while parsing the table: {e}")
             print(f"An unexpected error occurred while parsing the table: {e}")
     else:
         print("No table found in the OCR output.")
@@ -1210,6 +1318,7 @@ def process_invoice_ocr_output(output_text, invoice_ord: int = None, client_batc
         "invoice_line_items": df_invoice_items.to_dict(orient="records") if not df_invoice_items.empty else []
     }
 
+    logger.info("\nFull Invoice Data (as dict) with new structure: ")
     print("\nFull Invoice Data (as dict) with new structure: ")
     print(json.dumps(full_invoice_data, indent=4, default=str))
 
@@ -1271,24 +1380,29 @@ def extract_invoice_batch(model, processor, image_file_location, batch_size, dev
     
     try:
         if not all_png_files:
+            logger.info(f"No PNG files found in '{image_file_location}' to process.")
             print(f"No PNG files found in '{image_file_location}' to process.")
             return []
         else:
             # Process only the first 'batch_size' files as requested by the user
             files_to_process = all_png_files[0:batch_size]
             if not files_to_process:
+                logger.info("No files to process within the specified batch size.")
                 print("No files to process within the specified batch size.")
             else:
+                logger.info(f"Found {len(all_png_files)} PNG files. Processing the first {len(files_to_process)} invoices as requested.")
                 print(f"Found {len(all_png_files)} PNG files. Processing the first {len(files_to_process)} invoices as requested.")
 
                 # Call get_client_batch_id function
                 client_invoice_batch_id = get_client_batch_id()
+                logger.info(f"Processing batch with client_invoice_batch_id: {client_invoice_batch_id}")
                 print(f"Processing batch with client_invoice_batch_id: {client_invoice_batch_id}")
                 
                 for idx, png_file_name in enumerate(files_to_process):
                     invoice_ord = idx + 1 # Assign order based on iteration
                     image_file_path_str = os.path.join(image_file_location, png_file_name)
                     image_file_path_str = image_file_path_str.replace('invoices/invoices','invoices/')
+                    logger.info(f"\nProcessing: {image_file_path_str} (Invoice Order: {invoice_ord})")
                     print(f"\nProcessing: {image_file_path_str} (Invoice Order: {invoice_ord})")
                     
                     # Encode image for the OCR model, resizing to a max dimension of 1200 pixels
@@ -1327,6 +1441,7 @@ def extract_invoice_batch(model, processor, image_file_location, batch_size, dev
 
     except Exception as e:
         error_message = f"An unexpected error occurred in extract_invoie_batch function call: {str(e)}"
+        logger.error(error_message)
         print(error_message)
         updated_chat_history.append({
             "role": "user",
@@ -1365,6 +1480,7 @@ def extract_invoice_batch_generate_json_format(chat_history):
     
     # Ensure all_processed_invoices is defined
     if 'all_processed_invoices' not in globals():
+        logger.info("Warning: 'all_processed_invoices' not found in global scope. Initializing as empty list.")
         print("Warning: 'all_processed_invoices' not found in global scope. Initializing as empty list.")
         all_processed_invoices = []
 
@@ -1372,7 +1488,8 @@ def extract_invoice_batch_generate_json_format(chat_history):
         # Save the combined list of invoice data to a JSON file
         with open(output_all_invoices_filename, 'w') as f:
             json.dump(all_processed_invoices, f, indent=4, default=str)
-    
+
+        logger.info(f"Successfully saved all processed invoice data to '{output_all_invoices_filename}'")
         print(f"Successfully saved all processed invoice data to '{output_all_invoices_filename}'")
         print("Content of the saved JSON file:")
     
@@ -1380,6 +1497,7 @@ def extract_invoice_batch_generate_json_format(chat_history):
         with open(output_all_invoices_filename, 'r') as f:
             print(f.read())
     else:
+        logger.info(f"Quitting the invoice batch process.")
         print(f"Quitting the invoice batch process.")
 
 # =========================================
@@ -1431,27 +1549,27 @@ def format_invoice_for_indexing(invoice_data: dict, invoice_id: str = None) -> s
 # Function to handle calling the Postgress cloud database 'persist_invoice_batch' RPC function with error handling.
 # =========================================
 @traceable(run_type="chain", name="Medical Document Processing Platform")
-def insert_invoice_batch(supabase_url: str, supabase_key: str, payload: list) -> list:
+def insert_invoice_batch(postgres_url: str, postgres_key: str, payload: list) -> list:
     """
-    Handles calling the Supabase 'persist_invoice_batch' RPC function with error handling.
+    Handles calling the Postgres 'persist_invoice_batch' RPC function with error handling.
 
     Args:
-        supabase_url (str): The URL of the Supabase project.
-        supabase_key (str): The API key for the Supabase project.
+        postgres_url (str): The URL of the Postgres project.
+        postgres_key (str): The API key for the Postgres project.
         payload (list): The list of processed invoice data (JSON-serializable).
 
     Returns:
         list: A list of invoice_id (UUIDs) if the call is successful, otherwise an empty list.
     """
     try:
-        supabase = create_client(supabase_url, supabase_key)
+        postgres = create_client(postgres_url, postgres_key)
 
         # 🩹 Double-defensive: clean any rogue NaN/Inf before JSON serialization
         clean_payload = clean_floats(payload)
 
         # Call the RPC function with the corrected parameter name 'p_payload'
         result = (
-            supabase
+            postgres
             .rpc("persist_invoice_batch_v3", {"p_batch": payload})
             .execute()
         )
@@ -1463,11 +1581,13 @@ def insert_invoice_batch(supabase_url: str, supabase_key: str, payload: list) ->
             invoice_ids_in_order = [r["out_invoice_id"] for r in sorted(rows, key=lambda x: x["out_invoice_ord"])]
             return invoice_ids_in_order
         else:
-            print("Supabase RPC call successful, but no data or unexpected data format returned.")
+            logger.info("Postgres RPC call successful, but no data or unexpected data format returned.")
+            print("Postgres RPC call successful, but no data or unexpected data format returned.")
             return []
 
     except Exception as e:
-        error_message = f"An error occurred during Supabase RPC call(insert_invoice_batch): {str(e)}"
+        error_message = f"An error occurred during Postgres RPC call(insert_invoice_batch): {str(e)}"
+        logger.error(error_message)
         print(error_message)
         return error_message
 
@@ -1493,6 +1613,7 @@ def process_invoice_batch():
         chat_history = []
         extract_invoice_batch_generate_json_format(chat_history)
     except Exception as e:
+        logger.error(f"❌ EXTRACTION FAILED: {e}")
         print(f"❌ EXTRACTION FAILED: {e}")
         return f"❌ Invoice extraction failed: {str(e)}"
     
@@ -1500,6 +1621,7 @@ def process_invoice_batch():
         return "⚠️ No invoices were extracted. Check the invoice folder and batch size."
     
     extracted_count = len(all_processed_invoices)
+    logger.info(f"✅ Extracted {extracted_count} invoices")
     print(f"✅ Extracted {extracted_count} invoices")
     
     # ── Step 2: Persist to PostgreSQL ──────────────────────
@@ -1513,10 +1635,12 @@ def process_invoice_batch():
             raise ValueError(
                 f"DB ID count mismatch: expected {extracted_count}, got {len(returned_invoice_ids)}"
             )
+        logger.info(f"✅ Database persisted: {returned_invoice_ids}")
         print(f"✅ Database persisted: {returned_invoice_ids}")
         
     except Exception as e:
         print(f"❌ DATABASE PERSIST FAILED: {e}")
+        logger.error(f"❌ DATABASE PERSIST FAILED: {e}")
         return (
             f"⚠️ Partial failure — extracted {extracted_count} invoices, "
             f"but database save failed: {str(e)}"
@@ -1543,17 +1667,20 @@ def process_invoice_batch():
         try:
             if attempt > 0:
                 wait_time = attempt * 2  # 2s, 4s backoff
+                logger.info(f"🔄 Retry attempt {attempt}/{MAX_RETRIES} after {wait_time}s...")
                 print(f"🔄 Retry attempt {attempt}/{MAX_RETRIES} after {wait_time}s...")
                 time.sleep(wait_time)
             
             vectorstore.add_documents(docs_to_index)
             vectorstore.persist()
-            
+
+            logger.info(f"✅ Vector store indexed: {len(docs_to_index)} invoices")
             print(f"✅ Vector store indexed: {len(docs_to_index)} invoices")
             break  # success — exit retry loop
             
         except Exception as e:
             last_exception = e
+            logger.error(f"⚠️ Vector store index attempt {attempt + 1} failed: {e}")
             print(f"⚠️ Vector store index attempt {attempt + 1} failed: {e}")
             if attempt == MAX_RETRIES:
                 # Exhausted retries
@@ -1575,15 +1702,13 @@ def process_invoice_batch():
 # Warpper function to process_invoice_batch function so that it can be called directly from the process batch button click event
 # ===========================================
 def run_invoice_batch(chat_history):
-    # Invoke the LangChain tool (StructuredTool uses .invoke(), not ())
-    result = process_invoice_batch.invoke({})
+    """
+    Triggered by the 'Process Batch' button in Gradio UI.
+    """
+    image_folder = 'invoices'  # or wherever your batch folder is
+    batch_size = invoice_batch_size  # from env var
     
-    chat_history = list(chat_history) if chat_history else []
-    chat_history.append({
-        "role": "assistant",
-        "content": result
-    })
-    return chat_history
+    return batch_process_invoices(image_folder, batch_size, chat_history)
     
 # ===========================================
 # Function to process images
@@ -1646,6 +1771,7 @@ def process_invoice_image_for_chat(image_file_path_str, image_question, chat_his
         output_ids = model.generate(**inputs, max_new_tokens=1024)
         generated_ids = output_ids[0, inputs["input_ids"].shape[1]:]
         output_text = processor.decode(generated_ids, skip_special_tokens=True)
+        logger.info(f" Generated: {output_text}")
         print("Generated:", output_text)
 
         updated_chat_history.append({
@@ -1660,6 +1786,7 @@ def process_invoice_image_for_chat(image_file_path_str, image_question, chat_his
     except Exception as e:
         import traceback
         error_message = f"⚠️ Error analyzing invoice image: {str(e)}"
+        logger.error(error_message)        
         print(error_message)
         print(traceback.format_exc())  # <-- print full traceback for debugging
         updated_chat_history.append({
@@ -1678,9 +1805,9 @@ def process_invoice_image_for_chat(image_file_path_str, image_question, chat_his
 # ===========================================
 def load_pending_reviews():
     try:
-        supabase = create_client(POSTGRES_URL, POSTGRES_KEY)
+        postgres = create_client(POSTGRES_URL, POSTGRES_KEY)
         res = (
-            supabase
+            postgres
             .rpc("load_pending_review", {} )
             .execute()
         )
@@ -1705,6 +1832,7 @@ def load_pending_reviews():
             ])
         return rows
     except Exception as e:
+        logger.error(f"Error: {str(e)}")
         return [["-", "-", "-", "-", f"Error: {str(e)}", "-"]]
 
 def approve_review(review_id: str):
@@ -1714,9 +1842,9 @@ def approve_review(review_id: str):
     review_id = review_id.strip()
     try:
         # 1. Fetch pending review
-        supabase = create_client(POSTGRES_URL, POSTGRES_KEY)
+        postgres = create_client(POSTGRES_URL, POSTGRES_KEY)
         res = (
-            supabase
+            postgres
             .rpc("load_pending_review",
                  {
                      "p_review_id": review_id
@@ -1759,7 +1887,7 @@ def approve_review(review_id: str):
         
         # 4. Mark review as approved
         res = (
-            supabase
+            postgres
             .rpc("approve_review",
                  {
                      "p_review_id": review_id,
@@ -1771,10 +1899,12 @@ def approve_review(review_id: str):
 
         if not res.data:
             return f"❌ Review approval failed. Response: {review_id}"
-            
+
+        logger.info(f"✅ Approved {review_id}. DB Invoice ID: {invoice_id}. Indexed to vector store.")
         return f"✅ Approved {review_id}. DB Invoice ID: {invoice_id}. Indexed to vector store."
         
     except Exception as e:
+        logger.error(f"❌ Approval error: {str(e)}")
         return f"❌ Approval error: {str(e)}"
 
 def reject_review(review_id: str):
@@ -1783,9 +1913,9 @@ def reject_review(review_id: str):
     
     review_id = review_id.strip()
     try:
-        supabase = create_client(POSTGRES_URL, POSTGRES_KEY)
+        postgres = create_client(POSTGRES_URL, POSTGRES_KEY)
         res = (
-            supabase
+            postgres
             .rpc("reject_review",
                  {
                      "p_review_id": review_id,
@@ -1794,31 +1924,31 @@ def reject_review(review_id: str):
                 )
             .execute()
         )          
-        
+
+        logger.info(f"❌ Rejected review {review_id}")
         return f"❌ Rejected review {review_id}"
     except Exception as e:
+        logger.error(f"❌ Rejection error: {str(e)}")
         return f"❌ Rejection error: {str(e)}"
 
 def save_pending_review(image_path: str, raw_text: str, extracted: dict, reasons: list):
     try:
-        supabase = create_client(POSTGRES_URL, POSTGRES_KEY)
-        # Call the RPC function with the corrected parameter name 'p_payload'
-        result = (
-            supabase
-            .rpc("save_pending_review", 
-                 {
-                     "p_image_path": image_path,
-                     "p_raw_ocr_text": raw_text,
-                     "p_extracted_json": extracted,
-                     "p_status": "pending"
-                 }
-                )
-            .execute()
-        )        
-        
-        print(f"✅ Queued review record: {result.data[0]['id']}")
+        postgres = create_client(POSTGRES_URL, POSTGRES_KEY)
+        result = postgres.table("invoice_reviews").insert({
+            "image_path": image_path,
+            "raw_ocr_text": raw_text,
+            "extracted_json": extracted,
+            "failure_reasons": reasons,
+            "status": "pending"
+        }).execute()
+        review_id = result.data[0]['id']
+        logger.info(f"✅ Queued review record: {review_id}")
+        print(f"✅ Queued review record: {review_id}")
+        return review_id
     except Exception as e:
-        print(f"❌ Failed to queue review: {e}")        
+        logger.error(f"❌ Failed to queue review: {e}")
+        print(f"❌ Failed to queue review: {e}")
+        return None      
 
 # LangGraph Implementation for Deterministic Flow
 
@@ -1827,14 +1957,19 @@ def save_pending_review(image_path: str, raw_text: str, extracted: dict, reasons
 # ===========================================
 class InvoiceState(TypedDict):
     messages: list
-    image_path: Optional[str]
+    image_path: Optional[str]       # For single: image file path. For batch: folder path
     question: str
     rag_answer: Optional[str]
     extracted_data: Optional[dict]
     vision_answer: Optional[str]
     invoice_id: Optional[str]
-    error: Optional[str]     # <-- tracks partial failures
+    error: Optional[str]
     final_answer: str
+    review_status: Optional[str]    # "approved" | "pending_review" | "rejected"
+    review_reason: Optional[str]
+    review_id: Optional[str]       # NEW: for tracking queued reviews
+    batch_size: Optional[int]        # NEW: for batch processing
+    batch_results: Optional[list]   # NEW: list of {invoice, status, review_id}
 
 # ===========================================
 # 2. Graph Nodes
@@ -1882,6 +2017,7 @@ def vision_node(state: InvoiceState):
         _, extracted_data = process_invoice_ocr_output(raw_text, client_batch_id=client_invoice_batch_id)
         print(f"✓ Parsed invoice data: {json.dumps(extracted_data, indent=2, default=str)}")
     except Exception as e:
+        logger.error(f"⚠️ OCR parsing warning: {e}")
         print(f"⚠️ OCR parsing warning: {e}")
         extracted_data = {"raw_text": raw_text, "parse_error": str(e)}
     
@@ -1906,6 +2042,7 @@ def persist_postgres_node(state: InvoiceState):
         try:
             if attempt > 0:
                 wait_time = attempt * 2
+                logger.info(f"🔄 DB retry attempt {attempt}/{MAX_RETRIES} after {wait_time}s...")
                 print(f"🔄 DB retry attempt {attempt}/{MAX_RETRIES} after {wait_time}s...")
                 time.sleep(wait_time)
             
@@ -1913,6 +2050,7 @@ def persist_postgres_node(state: InvoiceState):
             
             if isinstance(result, list) and len(result) > 0:
                 invoice_id = result[0]
+                logger.info(f"✅ Persisted invoice to DB with ID: {invoice_id}")
                 print(f"✅ Persisted invoice to DB with ID: {invoice_id}")
                 break
             else:
@@ -1920,8 +2058,10 @@ def persist_postgres_node(state: InvoiceState):
                 
         except Exception as e:
             last_error = str(e)
+            logger.error(f"⚠️ DB persist attempt {attempt + 1} failed: {e}")
             print(f"⚠️ DB persist attempt {attempt + 1} failed: {e}")
             if attempt == MAX_RETRIES:
+                logger.error(f"❌ DB persist failed after {1 + MAX_RETRIES} attempts")
                 print(f"❌ DB persist failed after {1 + MAX_RETRIES} attempts")
                 return {"error": f"Database persist failed: {last_error}"}
     
@@ -1931,6 +2071,8 @@ def index_vectorstore_node(state: InvoiceState):
     """Add invoice to vector store with invoice number in metadata for exact lookup."""
     extracted = state.get("extracted_data")
     invoice_id = state.get("invoice_id")
+
+    MAX_RETRIES = 2 # Total attempts = 1 + MAX_RETRIES
     
     if not extracted:
         return {}
@@ -1948,11 +2090,30 @@ def index_vectorstore_node(state: InvoiceState):
             "invoice_no": invoice_no,      # ← NEW: the actual invoice number like "859269226"
         }
     )
-    
-    vectorstore.add_documents([doc])
-    vectorstore.persist()
-    print(f"✅ Indexed invoice {invoice_no} (DB ID: {invoice_id})")
-    return {}
+
+    for attempt in range(1 + MAX_RETRIES):
+        try:
+            if attempt > 0:
+                wait_time = attempt * 2  # 2s, 4s backoff
+                logger.info(f"🔄 Retry attempt {attempt}/{MAX_RETRIES} after {wait_time}s...")
+                print(f"🔄 Retry attempt {attempt}/{MAX_RETRIES} after {wait_time}s...")
+                time.sleep(wait_time)
+
+            vectorstore.add_documents([doc])
+            vectorstore.persist()
+
+            logger.info(f"✅ Indexed invoice {invoice_no} (DB ID: {invoice_id})")
+            print(f"✅ Indexed invoice {invoice_no} (DB ID: {invoice_id})")
+            return {}
+
+        except Exception as e:
+            last_exception = e
+            logger.error(f"⚠️ Vector store index attempt {attempt + 1} failed: {e}")
+            print(f"⚠️ Vector store index attempt {attempt + 1} failed: {e}")
+            if attempt == MAX_RETRIES:
+                logger.error(f"❌ Vector index failed after {1 + MAX_RETRIES} attempts")
+                print(f"❌ Vector index failed after {1 + MAX_RETRIES} attempts")
+                return {"error": f"Vector index failed: {last_error}"}
 
 def respond_node(state: InvoiceState):
     error = state.get("error")
@@ -1960,7 +2121,7 @@ def respond_node(state: InvoiceState):
     vision_answer = state.get("vision_answer")
     invoice_id = state.get("invoice_id")
     
-    # 🩹 PRESERVE HITL / review messages already composed
+    # ── PRESERVE HITL / review messages already composed ──
     if state.get("final_answer"):
         answer = state["final_answer"]
     elif rag_answer:
@@ -1975,6 +2136,10 @@ def respond_node(state: InvoiceState):
     elif invoice_id and not rag_answer:
         answer += f"\n\n💾 Invoice saved to database with ID: `{invoice_id}`"
     
+    # Add review ID reference if applicable
+    if state.get("review_status") == "pending_review" and state.get("review_id"):
+        answer += f"\n\n🆔 Review ID: `{state['review_id']}`"
+    
     return {"final_answer": answer}
 
 def validate_invoice_node(state: InvoiceState):
@@ -1986,6 +2151,7 @@ def validate_invoice_node(state: InvoiceState):
     # ── 1. IMAGE QUALITY ──
     if image_path and os.path.isfile(image_path):
         try:
+            import cv2
             img = cv2.imread(image_path)
             if img is not None:
                 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -1993,6 +2159,7 @@ def validate_invoice_node(state: InvoiceState):
                 if lap_var < 80:
                     reasons.append(f"Image blurry (lap_var={lap_var:.1f})")
         except Exception as e:
+            logger.error(f"Blur check skipped: {e}")
             print(f"Blur check skipped: {e}")
 
     # ── 2. HEADER FIELD COMPLETENESS ──
@@ -2011,32 +2178,36 @@ def validate_invoice_node(state: InvoiceState):
         if not val or str(val).strip() in ("", "None", "null"):
             reasons.append(f"Missing or empty: {field}")
 
-    # ── 3. LINE ITEM DATA QUALITY (NEW) ──
+    # ── 3. LINE ITEM DATA QUALITY ──
     items = extracted.get("invoice_line_items", [])
-    if not items:
-        reasons.append("No line items extracted")
-    else:
-        empty_or_junk = 0
-        for item in items:
-            # Handle both old and new column names
-            code = str(item.get("line_item_code") or item.get("Code") or "")
-            desc = str(item.get("line_item_description") or item.get("Description") or "")
-            qty = item.get("line_item_quantity") or item.get("Quantity")
-            amt = item.get("line_item_amount") or item.get("Amount")
+    
+    def is_real_item(item):
+        code = str(item.get("line_item_code") or item.get("Code") or "").strip()
+        desc = str(item.get("line_item_description") or item.get("Description") or "").strip()
+        amt = item.get("line_item_amount") or item.get("Amount")
+        
+        if str(amt).lower() in ("nan", "nat", "none", "null", ""):
+            amt = None
+            
+        if code.lower() in ("code:", "code", "item code", "service code"):
+            return False
+        if desc.lower() in ("description", "desc", "service"):
+            return False
+            
+        if not code and not desc:
+            return False
+        try:
+            float(str(amt).replace('$', '').replace(',', ''))
+        except (ValueError, TypeError):
+            return False
+        return True
 
-            # Strip pandas/numpy NaN representations
-            if str(qty).lower() in ("nan", "nat", "none", "null", ""):
-                qty = None
-            if str(amt).lower() in ("nan", "nat", "none", "null", ""):
-                amt = None
-
-            if not code.strip() and not desc.strip() and (qty is None or str(qty).strip() == "") and (amt is None or str(amt).strip() == ""):
-                empty_or_junk += 1
-
-        if empty_or_junk == len(items):
-            reasons.append("All line items are unreadable/empty")
-        elif empty_or_junk > 0:
-            reasons.append(f"{empty_or_junk}/{len(items)} line items are unreadable")
+    real_items = [it for it in items if is_real_item(it)]
+    
+    if not real_items:
+        reasons.append("Invoice line items are unreadable, empty, or could not be parsed")
+    elif len(real_items) < len(items):
+        reasons.append(f"{len(items) - len(real_items)}/{len(items)} line item rows are junk/headers")
 
     # ── 4. DB DUPLICATE CHECK ──
     invoice_no = inv.get("invoice_no")
@@ -2047,21 +2218,130 @@ def validate_invoice_node(state: InvoiceState):
 
     # ── 5. ROUTE TO HITL IF ANY ISSUES ──
     if reasons:
-        save_pending_review(image_path, vision_answer, extracted, reasons)
+        review_id = save_pending_review(image_path, vision_answer, extracted, reasons)
         return {
             "review_status": "pending_review",
             "review_reason": "; ".join(reasons),
+            "review_id": review_id,
             "final_answer": (
                 "⚠️ **This invoice requires manual review before it can be saved.**\n\n"
                 "**Reasons detected:**\n" + "\n".join(f"- {r}" for r in reasons)
             )
         }
 
-    return {"review_status": "approved", "review_reason": None}
+    return {"review_status": "approved", "review_reason": None, "review_id": None}
 
 def human_review_node(state: InvoiceState):
     """Return the already-composed warning message to the user."""
-    return {"final_answer": state.get("final_answer", "Manual review required.")}        
+    return {"final_answer": state.get("final_answer", "Manual review required.")}
+
+def batch_process_invoices(image_folder: str, batch_size: int, chat_history):
+    """
+    Process multiple invoices by invoking the existing invoice_agent per image.
+    Each invoice goes through the full pipeline: vision → validate → persist/index OR HITL queue.
+    """
+    # Resolve files
+    if isinstance(image_folder, list):
+        all_png_files = sorted(image_folder)
+    else:
+        all_png_files = sorted([
+            os.path.join(image_folder, f)
+            for f in os.listdir(image_folder)
+            if f.endswith('.png')
+        ])
+    
+    files_to_process = all_png_files[:batch_size]
+    
+    if not files_to_process:
+        chat_history = list(chat_history) if chat_history else []
+        chat_history.append({
+            "role": "assistant",
+            "content": "⚠️ No PNG invoices found to process."
+        })
+        return chat_history
+    
+    # Results tracking
+    approved_count = 0
+    review_count = 0
+    failed_count = 0
+    review_ids = []
+    persisted_ids = []
+    failed_files = []
+    
+    client_batch_id = get_client_batch_id()
+    print(f"📦 Starting batch {client_batch_id} with {len(files_to_process)} invoices")
+    
+    for idx, png_path in enumerate(files_to_process):
+        invoice_ord = idx + 1
+        print(f"\n{'='*60}")
+        print(f"Processing {invoice_ord}/{len(files_to_process)}: {png_path}")
+        print(f"{'='*60}")
+        
+        try:
+            # Invoke the EXISTING single-invoice graph
+            result = invoice_agent.invoke({
+                "messages": [],
+                "image_path": png_path,
+                "question": "Extract all invoice details and line items from this image.",
+            })
+            
+            status = result.get("review_status", "unknown")
+            
+            if status == "pending_review":
+                review_count += 1
+                rid = result.get("review_id", "N/A")
+                review_ids.append(rid)
+                print(f"⏸️ Queued for review: {rid}")
+                
+            elif status == "approved":
+                approved_count += 1
+                pid = result.get("invoice_id", "N/A")
+                persisted_ids.append(pid)
+                print(f"✅ Approved and persisted: {pid}")
+                
+            else:
+                failed_count += 1
+                failed_files.append(os.path.basename(png_path))
+                print(f"❌ Unknown status: {status}")
+                
+        except Exception as e:
+            failed_count += 1
+            failed_files.append(os.path.basename(png_path))
+            logger.error(f"❌ Exception processing {png_path}: {e}")
+            print(f"❌ Exception processing {png_path}: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # Build summary message
+    summary_lines = [
+        f"📦 **Batch Processing Complete** — Batch ID: `{client_batch_id}`",
+        f"",
+        f"📁 Total invoices scanned: **{len(files_to_process)}**",
+        f"✅ Auto-approved & persisted: **{approved_count}**",
+        f"⏸️ Sent to review queue: **{review_count}**",
+    ]
+    
+    if failed_count > 0:
+        summary_lines.append(f"❌ Failed / errors: **{failed_count}**")
+    
+    if persisted_ids:
+        summary_lines.append(f"\n💾 Persisted Invoice IDs: {', '.join(str(x) for x in persisted_ids if x)}")
+    
+    if review_ids:
+        summary_lines.append(f"\n🆔 Review Queue IDs: {', '.join(str(x) for x in review_ids if x)}")
+    
+    if failed_files:
+        summary_lines.append(f"\n⚠️ Failed files: {', '.join(failed_files)}")
+    
+    summary_lines.append(f"\n_Open the **🔍 Review Queue** tab to approve pending invoices._")
+    
+    chat_history = list(chat_history) if chat_history else []
+    chat_history.append({
+        "role": "assistant",
+        "content": "\n".join(summary_lines)
+    })
+    
+    return chat_history    
 
 # ===========================================
 # 3. Build & Compile the Graph
@@ -2252,7 +2532,7 @@ with gr.Blocks() as demo:
                 Medical Invoice Assistant
             </h2>
             <p style='text-align: center; color: #555;'>
-                Extract and process medical invoices in a batch automatically, upload and ask questions about your invoice.
+                Process medical invoices in a batch automatically, upload an invoice image and ask questions, see pending invoices in a review queue for human approval.
             </p>
             """
         )    
@@ -2316,6 +2596,7 @@ with gr.Blocks() as demo:
                 with gr.Column():
 
                     with gr.Row(elem_classes="equal-height"):
+                        # Left: Upload Invoice Image
                         with gr.Column(scale=1, elem_classes=["input-panel-mod", "multimodal-card"]):
                             with gr.Row():
                                 gr.HTML("<div class='panel-badge-mod'>Upload Invoice Image</div>")
@@ -2332,52 +2613,57 @@ with gr.Blocks() as demo:
                                 height=180
                             )
                         
-                        # Right: Extract Invoices
+                        # Middle: Extract Invoice(s)
                         with gr.Column(scale=1, min_width=100, elem_classes=["input-panel-mod", "multimodal-card"]):
                             with gr.Row():
-                                gr.HTML("<div class='panel-badge-mod'>Invoice Batch (KB|PG)</div>")
+                                gr.HTML(f"<div class='panel-badge-mod'>Admin</div>")
                             with gr.Row():
-                                gr.HTML("<div class='panel-badge-mod'>Batch Size: {invoice_batch_size}</div>")
+                                gr.HTML(f"<div class='panel-badge-mod'>Invoice Batch (PG|KB) / Batch Size: {invoice_batch_size}</div>")
                                 process_invoice_batch_btn = gr.Button("Process Batch",
-                                                                 variant="secondary",
+                                                                 variant="primary",
                                                                  min_width=200
                                                              )
                             with gr.Row():
-                                gr.HTML("<div class='panel-badge'>Knowledge Base</div>")
+                                gr.HTML("<div class='panel-badge'>Knowledge Base / Save Vector Store</div>")
                             with gr.Row():
-                                gr.HTML("<div class='panel-badge-mod'>Save Vector Store:</div>")
-                                save_vectordb_btn = gr.Button("Process Invoice",
-                                                                 variant="secondary",
+                                # gr.HTML("<div class='panel-badge-mod'>Save Vector Store:</div>")
+                                save_vectordb_btn = gr.Button("Index Invoice",
+                                                                 variant="primary",
                                                                  min_width=200
                                                                 )
+                        # Right: Reporting Dashboard
                         with gr.Column(scale=3, min_width=130, elem_classes=["input-panel-mod", "multimodal-card"]):
                             with gr.Row():
-                                gr.HTML("<div class='panel-badge-mod'>Reporting Dashboard</div>")
+                                gr.HTML("<div class='panel-badge-mod'>Reporting Dashboard</div><div class='panel-badge-mod2'>(Open report in new tab)</div>")
                             with gr.Row():
-                                gr.Button("",
-                                          variant="secondary",
-                                          min_width=25
-                                         )
-                            with gr.Row():
-                                gr.Button("📊 Invoices by Date",
-                                          link="https://app.powerbi.com/groups/me/reports/088dede8-660a-4f72-8be6-ba61523a0403/be5c721176c1733a28ec?experience=power-bi",
-                                          variant="primary",
-                                          min_width=200
-                                         )
-                            # 📊 Power BI button — opens in new tab
-                            with gr.Row():
-                                gr.Button(
-                                    "📊 Invoice By Total Amount Due",
-                                    link="https://app.powerbi.com/groups/me/reports/3978942e-0d1b-4d4a-a871-5cb255b14318/dfb504468e2c29b950a5?experience=power-bi",
-                                    variant="primary",
-                                    min_width=200
-                                    )                                
-                            with gr.Row():
-                                gr.Button("📊 Invoices by Line Items",
-                                          link="https://app.powerbi.com/groups/me/reports/586c08c9-5c15-4f38-878a-a86b25b131a8/08faf32e068341d017cb?experience=power-bi",
-                                          variant="primary",
-                                          min_width=200
-                                         )
+                                with gr.Column(scale=3, min_width=65, elem_classes=["input-panel-mod", "multimodal-card"]):
+                                    # with gr.Row():
+                                    #     gr.Button("",
+                                    #               variant="secondary",
+                                    #               min_width=25
+                                    #              )
+                                    with gr.Row():
+                                        gr.Button("📊 Invoices by Date",
+                                                  link="https://app.powerbi.com/groups/me/reports/088dede8-660a-4f72-8be6-ba61523a0403/be5c721176c1733a28ec?experience=power-bi",
+                                                  variant="primary",
+                                                  min_width=200
+                                                 )
+                                    # 📊 Power BI button — opens in new tab
+                                    with gr.Row():
+                                        gr.Button(
+                                            "📊 Invoice by Total Amt Due",
+                                            link="https://app.powerbi.com/groups/me/reports/3978942e-0d1b-4d4a-a871-5cb255b14318/dfb504468e2c29b950a5?experience=power-bi",
+                                            variant="primary",
+                                            min_width=200
+                                            )                                
+
+                                with gr.Column(scale=3, min_width=65, elem_classes=["input-panel-mod", "multimodal-card"]):
+                                    with gr.Row():
+                                        gr.Button("📊 Invoices by Line Items",
+                                                  link="https://app.powerbi.com/groups/me/reports/586c08c9-5c15-4f38-878a-a86b25b131a8/08faf32e068341d017cb?experience=power-bi",
+                                                  variant="primary",
+                                                  min_width=200
+                                                 )
 
     with gr.Tab("🔍 Review Queue"):
         gr.Markdown("## Pending Invoice Reviews")
@@ -2452,6 +2738,7 @@ with gr.Blocks() as demo:
         
         except Exception as e:
             error_message = f"Error: {e}"
+            logger.error(f"Error in respond: {e}")
             print(f"Error in respond: {e}")
         
             if chat_history is None:
@@ -2479,6 +2766,7 @@ with gr.Blocks() as demo:
             )
             return gr.Textbox(value="✅ Thanks for your Feedback. Saved to LangSmith.", visible=True)
         except Exception as e:
+            logger.error(f"❌ Feedback error: {str(e)}")
             return gr.Textbox(value=f"❌ Feedback error: {str(e)}", visible=True)             
                                 
     #===============================================
